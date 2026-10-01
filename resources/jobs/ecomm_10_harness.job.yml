@@ -1,0 +1,36 @@
+# Layer job 10: the ingestion harness, i.e. the two input feeds the platform "receives".
+# Stream A must land before Stream B, because the price catalog is derived from the landed clickstream.
+
+resources:
+  jobs:
+    ecomm_10_harness:
+      name: ecomm_10_harness
+      description: Stream A clickstream micro-batches, then Stream B price catalog (A2 check).
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: harness
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py),
+      # followed by the parameters specific to this job.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+        # job-specific
+        - name: replay_mode
+          default: skip_if_present
+
+      tasks:
+        - task_key: harness_clickstream
+          notebook_task:
+            notebook_path: ../../src/notebooks/10_harness/01_clickstream_replay.py
+
+        - task_key: harness_price_catalog
+          depends_on:
+            - task_key: harness_clickstream
+          notebook_task:
+            notebook_path: ../../src/notebooks/10_harness/02_price_catalog.py

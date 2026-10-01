@@ -1,0 +1,47 @@
+# Layer job 70: serving. Statistics, the materialized view, and the three-way benchmark.
+#
+#   statistics ─────────┐
+#                       ├─> three_way
+#   materialized_view ──┘
+#
+# materialized_view and three_way run SQL on the SQL warehouse through the Databricks SDK;
+# warehouse_id comes from the bundle variable (looked up by name in databricks.yml).
+
+resources:
+  jobs:
+    ecomm_70_serving:
+      name: ecomm_70_serving
+      description: ANALYZE statistics, refresh the category materialized view, benchmark three serving paths.
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: serving
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py),
+      # followed by the parameters specific to this job.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+        # job-specific
+        - name: warehouse_id
+          default: ${var.warehouse_id}
+
+      tasks:
+        - task_key: statistics
+          notebook_task:
+            notebook_path: ../../src/notebooks/70_serving/01_statistics.py
+
+        - task_key: materialized_view
+          notebook_task:
+            notebook_path: ../../src/notebooks/70_serving/02_materialized_view.py
+
+        - task_key: three_way
+          depends_on:
+            - task_key: statistics
+            - task_key: materialized_view
+          notebook_task:
+            notebook_path: ../../src/notebooks/70_serving/03_three_way.py

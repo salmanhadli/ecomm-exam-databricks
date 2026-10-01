@@ -1,0 +1,29 @@
+# Layer job 35: the step 5 evolution demo. Manual only: it is not part of ecomm_99_orchestrator.
+#
+# Run it once, after ecomm_30_silver has built silver.clickstream:
+#   databricks bundle run ecomm_35_evolution
+# It is safe to repeat; each change is skipped when already in place.
+
+resources:
+  jobs:
+    ecomm_35_evolution:
+      name: ecomm_35_evolution
+      description: "Step 5: add columns, rename and revert, change clustering keys, all without rewriting data files."
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: evolution
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py).
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+
+      tasks:
+        - task_key: evolve
+          notebook_task:
+            notebook_path: ../../src/notebooks/35_evolution/01_schema_and_clustering.py

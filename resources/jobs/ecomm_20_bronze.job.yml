@@ -1,0 +1,37 @@
+# Layer job 20: bronze. Runs one update of the Lakeflow pipeline, then verifies it.
+#
+# pipeline_task triggers an update and waits for it to finish. The pipeline is incremental:
+# Auto Loader only reads files it has not ingested before, so re-running the job is cheap and
+# never duplicates rows. `full_refresh: false` keeps it that way. A full refresh would reset the
+# checkpoints and re-ingest every file.
+
+resources:
+  jobs:
+    ecomm_20_bronze:
+      name: ecomm_20_bronze
+      description: Lakeflow pipeline update (Auto Loader into bronze), then completeness, dirt and history checks.
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: bronze
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py).
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+
+      tasks:
+        - task_key: ingest
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.ecomm_bronze.id}
+            full_refresh: false
+
+        - task_key: verify_bronze
+          depends_on:
+            - task_key: ingest
+          notebook_task:
+            notebook_path: ../../src/notebooks/20_bronze/01_verify_bronze.py

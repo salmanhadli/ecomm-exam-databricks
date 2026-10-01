@@ -1,0 +1,27 @@
+# Lakeflow Declarative Pipeline: the bronze layer.
+#
+# Two streaming tables fed by Auto Loader from the landing volume, one per source file
+# (src/pipelines/bronze/). The pipeline owns the checkpoints, so an update ingests only files
+# it has not seen before. Triggered (not continuous): ecomm_20_bronze runs one update per job run.
+#
+# Free Edition allows one active pipeline per pipeline type; this is the only one.
+
+resources:
+  pipelines:
+    ecomm_bronze:
+      name: ecomm_bronze
+      catalog: ${var.catalog}
+      schema: bronze              # tables are published as <catalog>.bronze.<name>
+      serverless: true
+      continuous: false
+      channel: CURRENT
+
+      root_path: ../../src/pipelines/bronze
+      libraries:
+        - glob:
+            include: ../../src/pipelines/bronze/**
+
+      # Available in pipeline code through spark.conf.get(...).
+      configuration:
+        ecomm.catalog: ${var.catalog}
+        ecomm.src_path: ${workspace.file_path}/src    # makes the `ecomm` library importable

@@ -1,0 +1,17 @@
+# Also read by `databricks bundle deploy`: ignored files are never uploaded to the workspace.
+
+# Python
+__pycache__/
+*.py[oc]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Databricks bundle local state
+.databricks/
+
+# Local data for the parity check (the Kaggle CSVs, 2.3 GB)
+data/
+
+# macOS
+.DS_Store

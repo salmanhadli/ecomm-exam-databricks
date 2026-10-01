@@ -1,0 +1,44 @@
+# Layer job 50: maintenance and the run's final checks.
+#
+#   optimize ──────┐
+#                  ├─> acceptance_checks
+#   history_guard ─┘
+#
+# No VACUUM anywhere: clean-up is left to predictive optimization, which honours each table's
+# retention properties (decision D-09). history_guard fails the run if any table's retention
+# was shortened; acceptance_checks fails it if a required acceptance criterion is not PASS.
+
+resources:
+  jobs:
+    ecomm_50_maintenance:
+      name: ecomm_50_maintenance
+      description: OPTIMIZE with before/after evidence, the history-retention guard, and the acceptance checks.
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: maintenance
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py).
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+
+      tasks:
+        - task_key: optimize
+          notebook_task:
+            notebook_path: ../../src/notebooks/50_maintenance/01_optimize.py
+
+        - task_key: history_guard
+          notebook_task:
+            notebook_path: ../../src/notebooks/50_maintenance/02_history_guard.py
+
+        - task_key: acceptance_checks
+          depends_on:
+            - task_key: optimize
+            - task_key: history_guard
+          notebook_task:
+            notebook_path: ../../src/notebooks/50_maintenance/03_acceptance_checks.py

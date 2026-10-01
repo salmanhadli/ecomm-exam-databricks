@@ -1,0 +1,52 @@
+# Layer job 60: the Q3 Black Friday audit. Manual only: it is not part of ecomm_99_orchestrator,
+# because the immutability proof runs UPDATE / DELETE / INSERT against the live gold table on
+# purpose (and then puts it back with RESTORE).
+#
+#   freeze ──> immutability_proof ──> retention_check
+#
+# Run after ecomm_40_gold has built gold.product_conversion_hourly:
+#   databricks bundle run ecomm_60_audit
+# To freeze the state as of a moment in the past:
+#   databricks bundle run ecomm_60_audit --params as_of_timestamp="2026-11-27 00:00:00"
+
+resources:
+  jobs:
+    ecomm_60_audit:
+      name: ecomm_60_audit
+      description: "Q3: DEEP CLONE a pinned version, prove it immutable under live DML, verify retention."
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: audit
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py),
+      # followed by the parameters specific to this job.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+        # job-specific
+        - name: audit_name
+          default: black_friday_2026_final
+        - name: as_of_timestamp
+          default: ""
+
+      tasks:
+        - task_key: freeze
+          notebook_task:
+            notebook_path: ../../src/notebooks/60_audit/01_freeze.py
+
+        - task_key: immutability_proof
+          depends_on:
+            - task_key: freeze
+          notebook_task:
+            notebook_path: ../../src/notebooks/60_audit/02_immutability_proof.py
+
+        - task_key: retention_check
+          depends_on:
+            - task_key: immutability_proof
+          notebook_task:
+            notebook_path: ../../src/notebooks/60_audit/03_retention_check.py

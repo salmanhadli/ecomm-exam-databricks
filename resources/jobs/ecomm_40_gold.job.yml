@@ -1,0 +1,36 @@
+# Layer job 40: gold. The funnel table and the answers to Q1 and Q2.
+#
+# The three tasks read only silver, so they run in parallel. Free Edition allows 5
+# concurrent tasks: these 3 plus the orchestrator's waiting task make 4.
+
+resources:
+  jobs:
+    ecomm_40_gold:
+      name: ecomm_40_gold
+      description: Hourly conversion funnel, Q1 price elasticity and Q2 cart abandonment.
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: gold
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py).
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+
+      tasks:
+        - task_key: conversion_hourly
+          notebook_task:
+            notebook_path: ../../src/notebooks/40_gold/01_conversion_hourly.py
+
+        - task_key: q1_elasticity
+          notebook_task:
+            notebook_path: ../../src/notebooks/40_gold/02_q1_elasticity.py
+
+        - task_key: q2_abandonment
+          notebook_task:
+            notebook_path: ../../src/notebooks/40_gold/03_q2_abandonment.py

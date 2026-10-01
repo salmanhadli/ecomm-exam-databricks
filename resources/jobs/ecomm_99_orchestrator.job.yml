@@ -1,0 +1,93 @@
+# The orchestrator: one run_job_task per layer job, chained with depends_on.
+#
+# Each layer stays an independent job you can run, retry or schedule on its own; this job only
+# decides the order. A failed layer fails its run_job_task, and every downstream layer is skipped.
+# `{{job.run_id}}` here is the orchestrator's own run id. Each layer receives it as
+# orchestration_run_id, so ops.measurements rows from all layers of one end-to-end run share it.
+#
+# Manual-only jobs are deliberately left out: ecomm_35_evolution (step 5 demo) and ecomm_60_audit
+# (Q3 freeze, which runs destructive DML against the live gold table on purpose).
+
+resources:
+  jobs:
+    ecomm_99_orchestrator:
+      name: ecomm_99_orchestrator
+      description: End-to-end run of the ECOMM exam, one layer job at a time.
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: orchestrator
+
+      # Passed down to the layer jobs through each run_job_task's job_parameters.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: source_copy_from
+          default: ""
+        - name: replay_mode
+          default: skip_if_present
+
+      tasks:
+        - task_key: run_setup
+          run_job_task:
+            job_id: ${resources.jobs.ecomm_00_setup.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              source_copy_from: "{{job.parameters.source_copy_from}}"
+              orchestration_run_id: "{{job.run_id}}"
+
+        - task_key: run_harness
+          depends_on:
+            - task_key: run_setup
+          run_job_task:
+            job_id: ${resources.jobs.ecomm_10_harness.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              replay_mode: "{{job.parameters.replay_mode}}"
+              orchestration_run_id: "{{job.run_id}}"
+
+        - task_key: run_bronze
+          depends_on:
+            - task_key: run_harness
+          run_job_task:
+            job_id: ${resources.jobs.ecomm_20_bronze.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              orchestration_run_id: "{{job.run_id}}"
+
+        - task_key: run_silver
+          depends_on:
+            - task_key: run_bronze
+          run_job_task:
+            job_id: ${resources.jobs.ecomm_30_silver.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              orchestration_run_id: "{{job.run_id}}"
+
+        - task_key: run_gold
+          depends_on:
+            - task_key: run_silver
+          run_job_task:
+            job_id: ${resources.jobs.ecomm_40_gold.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              orchestration_run_id: "{{job.run_id}}"
+
+        - task_key: run_serving
+          depends_on:
+            - task_key: run_gold
+          run_job_task:
+            job_id: ${resources.jobs.ecomm_70_serving.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              orchestration_run_id: "{{job.run_id}}"
+
+        # Last: maintenance ends with the acceptance checks, which must see every layer's evidence.
+        - task_key: run_maintenance
+          depends_on:
+            - task_key: run_serving
+          run_job_task:
+            job_id: ${resources.jobs.ecomm_50_maintenance.id}
+            job_parameters:
+              catalog: "{{job.parameters.catalog}}"
+              orchestration_run_id: "{{job.run_id}}"

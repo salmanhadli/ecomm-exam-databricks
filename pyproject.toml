@@ -1,0 +1,45 @@
+# Local development of the bundle's library (src/ecomm): unit tests and lint.
+# Nothing here is deployed; Databricks serverless provides Spark at run time.
+#
+#   uv run pytest            unit tests on a local Spark session (needs Java 17+)
+#   uv run ruff check .      lint
+
+[project]
+name = "ecomm-exam-databricks"
+version = "0.1.0"
+description = "The ECOMM clickstream exam on Databricks Free Edition, as a Declarative Automation Bundle"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pyspark==4.1.1",
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+extend-exclude = [".databricks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ecomm"]
+known-local-folder = ["conftest"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks use Databricks globals (spark, dbutils), import after the sys.path cell, and
+# carry markdown tables in `# MAGIC` lines that cannot be wrapped.
+"src/notebooks/**" = ["E402", "F821", "E501"]

@@ -1,0 +1,40 @@
+# Declarative Automation Bundle: the ECOMM clickstream exam on Databricks Free Edition (Delta Lake).
+#
+# From this directory:
+#   databricks bundle validate --strict
+#   databricks bundle deploy
+#   databricks bundle run ecomm_99_orchestrator
+#
+# See README.md for the runbook and docs/ for the architecture and design decisions.
+
+bundle:
+  name: ecomm_exam
+
+include:
+  - resources/*/*.yml
+
+sync:
+  # Local-only files never go to the workspace (git-ignored files are skipped too).
+  exclude:
+    - tests/**
+    - .venv/**
+    - data/**
+
+variables:
+  catalog:
+    description: >-
+      Unity Catalog catalog for every schema of the project. Letters, digits and
+      underscores only. Use `--var catalog=workspace` if Free Edition refuses CREATE CATALOG.
+    default: exam_ecommerce
+  warehouse_id:
+    description: SQL warehouse for the serving layer (materialized view, benchmark). Free Edition has one.
+    lookup:
+      warehouse: Serverless Starter Warehouse
+
+targets:
+  dev:
+    mode: development
+    default: true
+    # No workspace host here: the CLI uses its default profile (pick another with
+    # `--profile` or DATABRICKS_CONFIG_PROFILE), and a deploy started from a Databricks
+    # Git folder uses the workspace it runs in.

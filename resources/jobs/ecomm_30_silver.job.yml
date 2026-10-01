@@ -1,0 +1,42 @@
+# Layer job 30: silver. Clean, sessionize and price-bind the clickstream.
+#
+#   sessionize ─┐
+#               ├─> temporal_join
+#   price_intervals ─┘
+#
+# The two inputs of the temporal join are independent, so they run in parallel.
+
+resources:
+  jobs:
+    ecomm_30_silver:
+      name: ecomm_30_silver
+      description: Dedup + 30-minute sessions, silver price intervals, then the temporal join (3 exact strategies compared).
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: silver
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py).
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+
+      tasks:
+        - task_key: sessionize
+          notebook_task:
+            notebook_path: ../../src/notebooks/30_silver/01_sessionize.py
+
+        - task_key: price_intervals
+          notebook_task:
+            notebook_path: ../../src/notebooks/30_silver/02_price_intervals.py
+
+        - task_key: temporal_join
+          depends_on:
+            - task_key: sessionize
+            - task_key: price_intervals
+          notebook_task:
+            notebook_path: ../../src/notebooks/30_silver/03_temporal_join.py

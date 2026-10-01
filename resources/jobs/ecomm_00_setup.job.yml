@@ -1,0 +1,36 @@
+# Layer job 00: Unity Catalog objects and the source CSVs.
+# Runs on its own or is triggered by ecomm_99_orchestrator. All tasks are serverless (no cluster block).
+
+resources:
+  jobs:
+    ecomm_00_setup:
+      name: ecomm_00_setup
+      description: Catalog, schemas, landing volume, evidence table; land the five source CSVs.
+      max_concurrent_runs: 1
+      tags:
+        project: ecomm_exam
+        layer: setup
+
+      # Standard parameters, declared by every layer job (read by src/ecomm/runtime.py),
+      # followed by the parameters specific to this job.
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: run_id
+          default: "{{job.run_id}}"
+        - name: orchestration_run_id
+          default: ""
+        # job-specific
+        - name: source_copy_from
+          default: ""
+
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../../src/notebooks/00_setup/01_create_uc_objects.py
+
+        - task_key: land_source
+          depends_on:
+            - task_key: setup
+          notebook_task:
+            notebook_path: ../../src/notebooks/00_setup/02_land_source.py
