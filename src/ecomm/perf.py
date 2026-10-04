@@ -46,10 +46,11 @@ def time_full_compute(df: DataFrame) -> float:
 
     `count()` is not enough: Spark prunes columns a count does not need, so the join
     output might never be built. Hashing every column forces the full result and still
-    returns a single row.
+    returns a single row. The hashes are combined with XOR, not summed: a sum of 64-bit
+    hashes over millions of rows overflows BIGINT, and ANSI mode (on by default) raises.
     """
     started = time.perf_counter()
-    df.select(F.sum(F.xxhash64(*df.columns))).collect()
+    df.select(F.bit_xor(F.xxhash64(*df.columns))).collect()
     return time.perf_counter() - started
 
 

@@ -85,6 +85,20 @@ ECOMM_SOURCE_DIR=/path/to/ecommerce-events-history-in-cosmetics-shop uv run pyth
 databricks bundle deploy
 ```
 
+**First deploy into a new workspace.** A Lakeflow pipeline can only be created once its target
+catalog exists, and the catalog is created by the `setup` task
+([D-23](docs/decisions.md#d-23--first-deploy-creates-unity-catalog-objects-before-the-pipeline)).
+The first deploy creates every job but stops at the pipeline. Run the `setup` task on its own,
+then deploy again:
+
+```bash
+databricks bundle run ecomm_00_setup --only setup
+```
+
+```bash
+databricks bundle deploy
+```
+
 **1 · The end-to-end build.** It runs every layer in order and fails if a required acceptance
 criterion is not met:
 

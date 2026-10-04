@@ -10,11 +10,13 @@ from ecomm import quality
 from ecomm.schemas import EVENT_SCHEMA, PRICE_CATALOG_SCHEMA, RESCUED_COLUMN, with_rescued
 from ecomm.transforms.bronze import batch_id_from_path
 
-ROOT = "dbfs:/Volumes/exam_ecommerce/raw/landing/clickstream"
+ROOT = "/Volumes/exam_ecommerce/raw/landing/clickstream"
 
 
 @pytest.mark.parametrize("path, expected", [
     (f"{ROOT}/dt=2019-10-01/hh=10/min5=05/part-00000-abc.c000.json", "2019-10-01T10:05"),
+    # _metadata.file_path may report a volume file with a URI scheme; the folders still parse
+    (f"dbfs:{ROOT}/dt=2019-10-01/hh=10/min5=05/part-00000-abc.c000.json", "2019-10-01T10:05"),
     (f"{ROOT}/dt=2019-10-14/hh=23/min5=55/part-00007-def.c000.json", "2019-10-14T23:55"),
     (f"{ROOT}/stray-file.json", None),                     # outside the layout -> NULL -> fail rule
 ])

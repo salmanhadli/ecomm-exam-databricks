@@ -7,7 +7,7 @@
 # MAGIC | **Job → task** | `ecomm_00_setup` → `land_source` |
 # MAGIC | **Writes** | `/Volumes/<catalog>/raw/landing/source/cosmetics/` — the five monthly CSVs (2.3 GB) |
 # MAGIC | **Brief** | Dataset: *eCommerce Events History in Cosmetics Shop* (Kaggle) · evidence item 2 |
-# MAGIC | **Databricks concepts** | volume paths are plain file paths (`os`, `open`) · `dbutils.fs.cp` · Free Edition egress limits |
+# MAGIC | **Databricks concepts** | Unity Catalog volumes: `/Volumes/...` paths work with plain Python file APIs (`os`, `shutil`, `open`) · Free Edition egress limits |
 # MAGIC
 # MAGIC Three ways to fill the folder, tried in this order:
 # MAGIC
@@ -62,7 +62,7 @@ method = "already present"
 if missing and copy_from:
     method = f"copied from {copy_from}"
     for name in missing:
-        dbutils.fs.cp(f"{copy_from}/{name}", f"{target}/{name}")
+        shutil.copyfile(f"{copy_from}/{name}", f"{target}/{name}")
         print(f"copied {name}")
 
 elif missing:

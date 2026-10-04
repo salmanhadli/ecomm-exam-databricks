@@ -58,7 +58,7 @@ class Warehouse:
         from databricks.sdk.service.sql import QueryFilter
 
         for _ in range(attempts):
-            found = list(self.client.query_history.list(
+            found = _queries(self.client.query_history.list(
                 filter_by=QueryFilter(statement_ids=[statement_id]), include_metrics=True))
             if found and found[0].metrics is not None:
                 info = found[0]
@@ -67,3 +67,14 @@ class Warehouse:
                         "pruned_bytes": info.metrics.pruned_bytes}
             time.sleep(3)
         return {"duration_ms": None, "read_bytes": None, "pruned_bytes": None}
+
+
+def _queries(response) -> list:
+    """The query records in a query-history response.
+
+    SDK versions differ: some return an iterator of QueryInfo, others a ListQueriesResponse
+    whose `res` holds the records (the serverless runtime's SDK does the latter).
+    """
+    if hasattr(response, "res"):
+        return list(response.res or [])
+    return list(response)

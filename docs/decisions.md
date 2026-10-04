@@ -28,6 +28,7 @@ costs. Numbers come from runs; where the AWS build measured something first, it 
 | D-20 | Q3 is a deep clone that is never replaced, plus retention | applied |
 | D-21 | Serving SQL runs on the warehouse through the SDK; the MV refreshes per run | applied |
 | D-22 | Acceptance criteria are data, and the last task enforces them | applied |
+| D-23 | First deploy creates Unity Catalog objects before the pipeline | applied |
 
 ---
 
@@ -306,3 +307,17 @@ latest value of each and **fails the run** if a required criterion is missing or
 criteria from the manual jobs (A6, A7, A11) are reported without failing the run.
 **Consequence.** A green orchestrator run means every required criterion was met, and the proof
 is in `ops.measurements`.
+
+### D-23 · First deploy creates Unity Catalog objects before the pipeline
+
+**Context.** Creating a Lakeflow pipeline fails with `CATALOG_DOES_NOT_EXIST` unless its target
+catalog already exists. That is what the first `databricks bundle deploy` hit. Under D-04, the
+catalog and schemas are created by the `setup` task at run time, not by the bundle.
+**Decision.** Keep D-04 and bootstrap a new workspace in three steps:
+1. Deploy. The jobs are created; the pipeline is not.
+2. Run `ecomm_00_setup --only setup`.
+3. Deploy again.
+
+After that, every deploy is a single step.
+**Consequence.** No deployment command can ever drop the catalog. The cost is a two-pass first
+deploy, written down in the README.
