@@ -25,6 +25,7 @@ The brief's three questions:
 ├── databricks.yml        bundle: `catalog` and `warehouse_id` variables, `dev` target
 ├── resources/jobs/       one YAML per Lakeflow job (10 jobs)
 ├── resources/pipelines/  the bronze Lakeflow pipeline
+├── resources/dashboards/ the AI/BI dashboard (definition in src/dashboards/)
 ├── src/ecomm/            the library: settings, naming, data model, history policy, transforms, …
 ├── src/pipelines/        bronze pipeline source (Auto Loader + expectations)
 ├── src/notebooks/        one folder per layer; thin notebooks that call the library
@@ -176,7 +177,11 @@ WHERE orchestration_run_id = (SELECT max(orchestration_run_id) FROM exam_ecommer
 ORDER BY recorded_at
 ```
 
-**The answers.** Open `src/sql/reports/q1_elasticity.sql`, `q2_abandonment.sql` and
+**The dashboard.** *Dashboards → [dev <you>] ECOMM exam report* has four pages: an overview with
+the daily funnel and the acceptance criteria, then one page per question (Q1 elasticity, Q2
+abandoned carts, Q3 frozen vs live). It is deployed with the bundle and runs on the SQL warehouse.
+
+**The answers in SQL.** Open `src/sql/reports/q1_elasticity.sql`, `q2_abandonment.sql` and
 `q3_black_friday_audit.sql` in the SQL editor, from the bundle's folder in the workspace. They
 take the catalog, and for Q1 the volume floor, as named parameters.
 

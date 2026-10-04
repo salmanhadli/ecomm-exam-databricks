@@ -56,7 +56,7 @@ flowchart TB
 | Gold: funnel, Q1, Q2 | 6 | built |
 | Maintenance and acceptance checks; Q3 audit | 7 | built (audit is a manual job) |
 | Serving: statistics, materialized view, three-way benchmark | 8 | built |
-| AI/BI dashboard | 8b | after the first run: its SQL has to be tested against real tables first |
+| AI/BI dashboard: Overview, Q1, Q2, Q3 | 8b | built (queries tested against the live tables before deploy) |
 
 ## 2 · Jobs and orchestration
 
@@ -128,7 +128,8 @@ databricks/
 ├── databricks.yml               bundle: name, `catalog` + `warehouse_id` variables, `dev` target
 ├── resources/
 │   ├── jobs/                    one YAML per job: ecomm_NN_<layer>.job.yml
-│   └── pipelines/               the bronze Lakeflow pipeline
+│   ├── pipelines/               the bronze Lakeflow pipeline
+│   └── dashboards/              the AI/BI dashboard
 ├── src/
 │   ├── ecomm/                   the library: all logic lives here
 │   │   ├── settings.py          defended thresholds (noise, windows, floors)
@@ -149,7 +150,8 @@ databricks/
 │   ├── notebooks/               thin: parameters → library call → write → evidence
 │   │   ├── 00_setup/  10_harness/  20_bronze/  30_silver/  35_evolution/
 │   │   └── 40_gold/  50_maintenance/  60_audit/  70_serving/
-│   └── sql/reports/             Q1, Q2, Q3 for the SQL editor (named parameters)
+│   ├── sql/reports/             Q1, Q2, Q3 for the SQL editor (named parameters)
+│   └── dashboards/              the dashboard definition (.lvdash.json)
 ├── tests/
 │   ├── unit/                    fast, local Spark, hand-built inputs (pytest)
 │   └── parity/                  harness → silver → gold on the full data vs the AWS numbers

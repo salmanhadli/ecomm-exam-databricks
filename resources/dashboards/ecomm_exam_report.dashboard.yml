@@ -1,0 +1,18 @@
+# AI/BI dashboard: the exam's three answers, plus the acceptance criteria.
+#
+# Four pages: Overview, Q1 elasticity, Q2 abandoned carts, Q3 audit. The definition lives in
+# src/dashboards/ecomm_exam_report.lvdash.json. Its queries name tables without a catalog
+# (gold tables bare, audit/ops tables schema-qualified); dataset_catalog and dataset_schema
+# below fill in the rest, so the same file works for any catalog this bundle is deployed to.
+#
+# To edit: change it in the dashboard UI, then pull the change back into the file with
+#   databricks bundle generate dashboard --resource ecomm_exam_report --force
+
+resources:
+  dashboards:
+    ecomm_exam_report:
+      display_name: ECOMM exam report
+      file_path: ../../src/dashboards/ecomm_exam_report.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: gold

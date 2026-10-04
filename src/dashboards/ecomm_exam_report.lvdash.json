@@ -1,0 +1,1629 @@
+{
+  "datasets": [
+    {
+      "name": "ds_daily",
+      "displayName": "Daily funnel",
+      "queryLines": [
+        "SELECT date_trunc('DAY', event_hour) AS day,\n",
+        "       sum(views) AS views, sum(carts) AS carts, sum(purchases) AS purchases, sum(revenue) AS revenue\n",
+        "FROM product_conversion_hourly\n",
+        "GROUP BY date_trunc('DAY', event_hour)\n",
+        "ORDER BY day\n"
+      ],
+      "columns": [
+        {
+          "displayName": "View to cart",
+          "description": "Carts per view",
+          "expression": "SUM(`carts`) * 1.0 / SUM(`views`)"
+        },
+        {
+          "displayName": "Cart to purchase",
+          "description": "Purchases per cart",
+          "expression": "SUM(`purchases`) * 1.0 / SUM(`carts`)"
+        }
+      ]
+    },
+    {
+      "name": "ds_acceptance",
+      "displayName": "Acceptance criteria",
+      "queryLines": [
+        "WITH titles AS (SELECT * FROM VALUES ('A1', 1, 'Two independent feeds'), ('A2', 2, '>= 200 products change > 15%'), ('A3', 3, 'Own 30-minute sessions'), ('A4', 4, 'Temporal join: 3 strategies compared'), ('A5', 5, 'Price binding accuracy'), ('A6', 6, 'Schema evolution, no files rewritten'), ('A7', 7, 'Clustering evolution, no files rewritten'), ('A8', 8, 'Compaction measured'), ('A9', 9, 'Q1 elasticity'), ('A10', 10, 'Q2 lost revenue, two definitions'), ('A11', 11, 'Q3 frozen copy + retention'), ('A12', 12, 'Serving: stats, MV, three-way') AS t(id, ord, criterion)),\n",
+        "latest AS (\n",
+        "  SELECT substr(metric, 12) AS id, value AS status, step AS proved_by, recorded_at,\n",
+        "         row_number() OVER (PARTITION BY metric ORDER BY recorded_at DESC) AS r\n",
+        "  FROM ops.measurements\n",
+        "  WHERE metric LIKE 'acceptance\\\\_A%'\n",
+        ")\n",
+        "SELECT t.ord, t.id, t.criterion, coalesce(l.status, 'NOT RUN') AS status, l.proved_by, l.recorded_at\n",
+        "FROM titles t LEFT JOIN latest l ON l.id = t.id AND l.r = 1\n",
+        "ORDER BY t.ord\n"
+      ]
+    },
+    {
+      "name": "ds_q1_floors",
+      "displayName": "Q1 by volume floor",
+      "queryLines": [
+        "WITH floors AS (SELECT explode(array(1, 5, 10, 30)) AS floor)\n",
+        "SELECT f.floor,\n",
+        "       concat('>= ', f.floor, ' purchases') AS floor_label,\n",
+        "       count(e.product_id) AS drops_qualifying,\n",
+        "       percentile_approx(e.elasticity, 0.5) AS median_elasticity,\n",
+        "       avg(CASE WHEN e.product_id IS NULL THEN NULL WHEN e.post_purchases = 0 THEN 1.0 ELSE 0.0 END)\n",
+        "         AS share_no_post_purchase\n",
+        "FROM floors f\n",
+        "LEFT JOIN price_elasticity e\n",
+        "  ON e.base_purchases >= f.floor AND e.pct_price_change < 0 AND e.elasticity IS NOT NULL\n",
+        "GROUP BY f.floor\n",
+        "ORDER BY f.floor\n"
+      ]
+    },
+    {
+      "name": "ds_q1_drops",
+      "displayName": "Q1 price drops at the headline floor",
+      "queryLines": [
+        "SELECT product_id, category_id, changed_at, original_price, new_price, pct_price_change,\n",
+        "       base_purchases, base_purchases_per_2h, post_purchases, post_purchases_per_2h, elasticity\n",
+        "FROM price_elasticity\n",
+        "WHERE pct_price_change < 0 AND base_purchases >= 5 AND elasticity IS NOT NULL\n",
+        "ORDER BY elasticity\n"
+      ]
+    },
+    {
+      "name": "ds_q2_carts",
+      "displayName": "Q2 abandoned carts",
+      "queryLines": [
+        "SELECT product_id, category_id, session_key, carted_at, changed_at, price_at_cart,\n",
+        "       price_before_increase, pct_price_change, lost_revenue_at_cart, lost_revenue_at_old\n",
+        "FROM cart_abandonment\n"
+      ]
+    },
+    {
+      "name": "ds_q2_top",
+      "displayName": "Q2 top categories",
+      "queryLines": [
+        "SELECT category_id,\n",
+        "       count(DISTINCT session_key) AS sessions,\n",
+        "       count(*) AS carts,\n",
+        "       sum(lost_revenue_at_cart) AS lost_at_cart_price,\n",
+        "       sum(lost_revenue_at_old) AS lost_at_old_price\n",
+        "FROM cart_abandonment\n",
+        "GROUP BY category_id\n",
+        "ORDER BY lost_at_cart_price DESC, category_id\n",
+        "LIMIT 10\n"
+      ]
+    },
+    {
+      "name": "ds_q3",
+      "displayName": "Q3 frozen vs live",
+      "queryLines": [
+        "WITH frozen AS (\n",
+        "  SELECT category_id, sum(purchases) AS purchases, sum(revenue) AS revenue\n",
+        "  FROM audit.product_conversion_hourly_black_friday_2026_final GROUP BY category_id),\n",
+        "live AS (\n",
+        "  SELECT category_id, sum(purchases) AS purchases, sum(revenue) AS revenue\n",
+        "  FROM product_conversion_hourly GROUP BY category_id)\n",
+        "SELECT coalesce(f.category_id, l.category_id) AS category_id,\n",
+        "       f.purchases AS frozen_purchases, l.purchases AS live_purchases,\n",
+        "       f.revenue AS frozen_revenue, l.revenue AS live_revenue,\n",
+        "       coalesce(l.purchases, 0) - coalesce(f.purchases, 0) AS purchases_drift,\n",
+        "       CASE WHEN coalesce(l.purchases, 0) = coalesce(f.purchases, 0)\n",
+        "             AND coalesce(l.revenue, 0) = coalesce(f.revenue, 0)\n",
+        "            THEN 'unchanged' ELSE 'moved' END AS live_vs_frozen\n",
+        "FROM frozen f FULL OUTER JOIN live l ON f.category_id = l.category_id\n",
+        "ORDER BY frozen_revenue DESC NULLS LAST\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Overview",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "ov-title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## ECOMM Clickstream on Databricks"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "ov-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Fourteen days of a cosmetics shop's clickstream, rebuilt as a medallion lakehouse on Databricks Free Edition. The pages answer the exam's three questions: **Q1** price elasticity, **Q2** carts abandoned after a price increase, **Q3** a frozen Black Friday audit."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "ov-purchases",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(purchases)",
+                      "expression": "SUM(`purchases`)"
+                    },
+                    {
+                      "name": "daily(day)",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(purchases)",
+                  "displayName": "Purchases",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(day)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Purchases"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ov-revenue",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(revenue)",
+                      "expression": "SUM(`revenue`)"
+                    },
+                    {
+                      "name": "daily(day)",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(revenue)",
+                  "displayName": "Revenue",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(day)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Revenue"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ov-view-to-cart",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "measure(View to cart)",
+                      "expression": "MEASURE(`View to cart`)"
+                    },
+                    {
+                      "name": "daily(day)",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(View to cart)",
+                  "displayName": "View → cart",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(day)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "View → cart"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ov-cart-to-purchase",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "measure(Cart to purchase)",
+                      "expression": "MEASURE(`Cart to purchase`)"
+                    },
+                    {
+                      "name": "daily(day)",
+                      "expression": "DATE_TRUNC(\"DAY\", `day`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Cart to purchase)",
+                  "displayName": "Cart → purchase",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(day)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cart → purchase"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "ov-funnel-trend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_daily",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "views",
+                      "expression": "`views`"
+                    },
+                    {
+                      "name": "carts",
+                      "expression": "`carts`"
+                    },
+                    {
+                      "name": "purchases",
+                      "expression": "`purchases`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "day",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "views",
+                      "displayName": "Views"
+                    },
+                    {
+                      "fieldName": "carts",
+                      "displayName": "Carts"
+                    },
+                    {
+                      "fieldName": "purchases",
+                      "displayName": "Purchases"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Daily funnel, 2019-10-01 to 2019-10-14 (UTC)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "ov-acceptance",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_acceptance",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "id",
+                      "expression": "`id`"
+                    },
+                    {
+                      "name": "criterion",
+                      "expression": "`criterion`"
+                    },
+                    {
+                      "name": "status",
+                      "expression": "`status`"
+                    },
+                    {
+                      "name": "proved_by",
+                      "expression": "`proved_by`"
+                    },
+                    {
+                      "name": "recorded_at",
+                      "expression": "`recorded_at`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "id",
+                    "displayName": "#"
+                  },
+                  {
+                    "fieldName": "criterion",
+                    "displayName": "Criterion"
+                  },
+                  {
+                    "fieldName": "status",
+                    "displayName": "Status"
+                  },
+                  {
+                    "fieldName": "proved_by",
+                    "displayName": "Proved by"
+                  },
+                  {
+                    "fieldName": "recorded_at",
+                    "displayName": "Recorded (UTC)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Acceptance criteria, latest result of each"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "q1",
+      "displayName": "Q1 · Elasticity",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "q1-title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Q1 · What happens to purchases after a price drop of more than 15%?"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "q1-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Baseline: the original price's own interval, up to 7 days before the change. Post: the 2 hours after, while the new price holds. Both normalised to 2-hour blocks. A drop counts only if its baseline has at least the floor's number of purchases."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "q1-qualifying",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q1_floors",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "floor_label",
+                      "expression": "`floor_label`"
+                    },
+                    {
+                      "name": "drops_qualifying",
+                      "expression": "`drops_qualifying`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "floor_label",
+                  "displayName": "Baseline purchases",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        ">= 1 purchases",
+                        ">= 5 purchases",
+                        ">= 10 purchases",
+                        ">= 30 purchases"
+                      ]
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "drops_qualifying",
+                  "displayName": "Price drops",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Price drops that clear each volume floor"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "q1-empty-post",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q1_floors",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "floor_label",
+                      "expression": "`floor_label`"
+                    },
+                    {
+                      "name": "share_no_post_purchase",
+                      "expression": "`share_no_post_purchase`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "floor_label",
+                  "displayName": "Baseline purchases",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        ">= 1 purchases",
+                        ">= 5 purchases",
+                        ">= 10 purchases",
+                        ">= 30 purchases"
+                      ]
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "share_no_post_purchase",
+                  "displayName": "No purchase in the 2 h after",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "label": {
+                  "show": true
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "…of which had no purchase at all in the 2 hours after"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 6,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "q1-reading",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**How to read this.** When the 2 hours after a drop hold no purchase, the purchase change is −100% and elasticity is exactly −1 ÷ price change: a *positive* number for a drop. That comes from the window's length, not from demand. Confounders this data cannot rule out: time of day, promotions, stock-outs, competitor prices, when the change was observed, and small counts."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "q1-drops",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q1_drops",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "product_id",
+                      "expression": "`product_id`"
+                    },
+                    {
+                      "name": "changed_at",
+                      "expression": "`changed_at`"
+                    },
+                    {
+                      "name": "original_price",
+                      "expression": "`original_price`"
+                    },
+                    {
+                      "name": "new_price",
+                      "expression": "`new_price`"
+                    },
+                    {
+                      "name": "pct_price_change",
+                      "expression": "`pct_price_change`"
+                    },
+                    {
+                      "name": "base_purchases",
+                      "expression": "`base_purchases`"
+                    },
+                    {
+                      "name": "post_purchases",
+                      "expression": "`post_purchases`"
+                    },
+                    {
+                      "name": "elasticity",
+                      "expression": "`elasticity`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "product_id",
+                    "displayName": "Product"
+                  },
+                  {
+                    "fieldName": "changed_at",
+                    "displayName": "Changed (UTC)"
+                  },
+                  {
+                    "fieldName": "original_price",
+                    "displayName": "Old price",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "new_price",
+                    "displayName": "New price",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "pct_price_change",
+                    "displayName": "Price change",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "base_purchases",
+                    "displayName": "Baseline purchases"
+                  },
+                  {
+                    "fieldName": "post_purchases",
+                    "displayName": "Purchases in 2 h after"
+                  },
+                  {
+                    "fieldName": "elasticity",
+                    "displayName": "Elasticity",
+                    "format": {
+                      "type": "number",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Price drops at the headline floor (≥ 5 baseline purchases)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "q2",
+      "displayName": "Q2 · Abandoned carts",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "q2-title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Q2 · Carts abandoned within 30 minutes of a price increase"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "q2-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Lost revenue two ways: at the price shown when the item was carted (headline) and at the price before the increase (sensitivity). The gap is what the increase was meant to earn. Grouped by category_id, because category_code is missing for 98% of events."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "q2-carts",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q2_carts",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "count(session_key)",
+                      "expression": "COUNT(`session_key`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "count(session_key)",
+                  "displayName": "Abandoned carts"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Abandoned carts"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q2-sessions",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q2_carts",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "countdistinct(session_key)",
+                      "expression": "COUNT(DISTINCT `session_key`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "countdistinct(session_key)",
+                  "displayName": "Abandoned sessions"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Abandoned sessions"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q2-lost-cart",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q2_carts",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(lost_revenue_at_cart)",
+                      "expression": "SUM(`lost_revenue_at_cart`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(lost_revenue_at_cart)",
+                  "displayName": "Lost at cart price",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Lost at cart price"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q2-lost-old",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q2_carts",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(lost_revenue_at_old)",
+                      "expression": "SUM(`lost_revenue_at_old`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(lost_revenue_at_old)",
+                  "displayName": "Lost at old price",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Lost at old price"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q2-by-category",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q2_top",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "category_id",
+                      "expression": "`category_id`"
+                    },
+                    {
+                      "name": "lost_at_cart_price",
+                      "expression": "`lost_at_cart_price`"
+                    },
+                    {
+                      "name": "lost_at_old_price",
+                      "expression": "`lost_at_old_price`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "mark": {
+                "layout": "group"
+              },
+              "encodings": {
+                "y": {
+                  "fieldName": "category_id",
+                  "displayName": "category_id",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "x": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "lost_at_cart_price",
+                      "displayName": "At cart price"
+                    },
+                    {
+                      "fieldName": "lost_at_old_price",
+                      "displayName": "At old price"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Lost revenue by category, top 10"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "q2-detail",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q2_carts",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "carted_at",
+                      "expression": "`carted_at`"
+                    },
+                    {
+                      "name": "session_key",
+                      "expression": "`session_key`"
+                    },
+                    {
+                      "name": "product_id",
+                      "expression": "`product_id`"
+                    },
+                    {
+                      "name": "category_id",
+                      "expression": "`category_id`"
+                    },
+                    {
+                      "name": "pct_price_change",
+                      "expression": "`pct_price_change`"
+                    },
+                    {
+                      "name": "price_at_cart",
+                      "expression": "`price_at_cart`"
+                    },
+                    {
+                      "name": "price_before_increase",
+                      "expression": "`price_before_increase`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "carted_at",
+                    "displayName": "Carted (UTC)"
+                  },
+                  {
+                    "fieldName": "session_key",
+                    "displayName": "Session"
+                  },
+                  {
+                    "fieldName": "product_id",
+                    "displayName": "Product"
+                  },
+                  {
+                    "fieldName": "category_id",
+                    "displayName": "category_id"
+                  },
+                  {
+                    "fieldName": "pct_price_change",
+                    "displayName": "Increase",
+                    "format": {
+                      "type": "number-percent",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 1
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "price_at_cart",
+                    "displayName": "Cart price",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "price_before_increase",
+                    "displayName": "Old price",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Every abandoned cart"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "q3",
+      "displayName": "Q3 · Audit",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "q3-title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Q3 · Black Friday, frozen"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "q3-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "audit.product_conversion_hourly_black_friday_2026_final is a DEEP CLONE of gold at one pinned version, kept for 365 days. Change the live table and refresh this page: the frozen numbers never move, and the table below shows which categories did."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "q3-frozen-purchases",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q3",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(frozen_purchases)",
+                      "expression": "SUM(`frozen_purchases`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(frozen_purchases)",
+                  "displayName": "Frozen purchases",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Frozen purchases"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q3-live-purchases",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q3",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(live_purchases)",
+                      "expression": "SUM(`live_purchases`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(live_purchases)",
+                  "displayName": "Live purchases",
+                  "format": {
+                    "type": "number",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Live purchases"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q3-frozen-revenue",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q3",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(frozen_revenue)",
+                      "expression": "SUM(`frozen_revenue`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(frozen_revenue)",
+                  "displayName": "Frozen revenue",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Frozen revenue"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q3-live-revenue",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q3",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "sum(live_revenue)",
+                      "expression": "SUM(`live_revenue`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(live_revenue)",
+                  "displayName": "Live revenue",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Live revenue"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "q3-by-category",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_q3",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "category_id",
+                      "expression": "`category_id`"
+                    },
+                    {
+                      "name": "live_vs_frozen",
+                      "expression": "`live_vs_frozen`"
+                    },
+                    {
+                      "name": "frozen_purchases",
+                      "expression": "`frozen_purchases`"
+                    },
+                    {
+                      "name": "live_purchases",
+                      "expression": "`live_purchases`"
+                    },
+                    {
+                      "name": "purchases_drift",
+                      "expression": "`purchases_drift`"
+                    },
+                    {
+                      "name": "frozen_revenue",
+                      "expression": "`frozen_revenue`"
+                    },
+                    {
+                      "name": "live_revenue",
+                      "expression": "`live_revenue`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "category_id",
+                    "displayName": "category_id"
+                  },
+                  {
+                    "fieldName": "live_vs_frozen",
+                    "displayName": "Live vs frozen"
+                  },
+                  {
+                    "fieldName": "frozen_purchases",
+                    "displayName": "Frozen purchases"
+                  },
+                  {
+                    "fieldName": "live_purchases",
+                    "displayName": "Live purchases"
+                  },
+                  {
+                    "fieldName": "purchases_drift",
+                    "displayName": "Drift"
+                  },
+                  {
+                    "fieldName": "frozen_revenue",
+                    "displayName": "Frozen revenue",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  },
+                  {
+                    "fieldName": "live_revenue",
+                    "displayName": "Live revenue",
+                    "format": {
+                      "type": "number-currency",
+                      "currencyCode": "USD",
+                      "abbreviation": "compact",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 2
+                      }
+                    }
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Frozen vs live, by category"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 9
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {
+        "light": "#F3F5F8",
+        "dark": "#0E1319"
+      },
+      "widgetBackgroundColor": {
+        "light": "#FFFFFF",
+        "dark": "#161D26"
+      },
+      "widgetBorderColor": {
+        "light": "#FFFFFF",
+        "dark": "#161D26"
+      },
+      "fontColor": {
+        "light": "#16202B",
+        "dark": "#E2E7EE"
+      },
+      "selectionColor": {
+        "light": "#1A707C",
+        "dark": "#4DB8C3"
+      },
+      "visualizationColors": [
+        "#1A707C",
+        "#D58B55",
+        "#474DAE",
+        "#D9AF48",
+        "#5C6F86",
+        "#9298EA",
+        "#4DB8C3"
+      ],
+      "widgetHeaderAlignment": "LEFT"
+    }
+  }
+}
