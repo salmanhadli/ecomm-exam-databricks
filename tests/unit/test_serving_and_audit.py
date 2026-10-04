@@ -28,6 +28,14 @@ def test_category_daily_query_runs_and_weights_price_by_units(spark):
     assert row.revenue_per_purchase == Decimal("208.1")                   # 2081 / 10 units
 
 
+def test_a_cache_busting_filter_keeps_the_answer_identical(spark):
+    gold(spark, [("a", "c1", None, ts("2019-10-01 10:00:00"), 10, 2, 1, Decimal("5.00"))]
+         ).createOrReplaceTempView("gold_hourly")
+    plain = spark.sql(category_daily_sql("gold_hourly")).collect()
+    busted = spark.sql(category_daily_sql("gold_hourly", where="'run 42' IS NOT NULL")).collect()
+    assert plain == busted
+
+
 def test_the_view_stays_eligible_for_incremental_refresh():
     ddl = mv_ddl(Project("exam_ecommerce"), "exam_ecommerce.gold.product_conversion_hourly")
     assert "DISTINCT" not in ddl.upper()

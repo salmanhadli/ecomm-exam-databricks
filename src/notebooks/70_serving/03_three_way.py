@@ -23,9 +23,15 @@
 # MAGIC warehouse start-up is not timed.
 # MAGIC
 # MAGIC **Result cache.** The warehouse returns a cached result for a repeated query on unchanged
-# MAGIC tables, which would time the cache, not the query. Each query is timed on its first
-# MAGIC execution in the run. Gold and the view get a new version every run, which invalidates any
-# MAGIC cached result from earlier runs.
+# MAGIC tables, which would time the cache instead of the query. The first workspace run did exactly
+# MAGIC that: `system.query.history` showed `from_result_cache = true` and 0 bytes read. A unique SQL
+# MAGIC comment does **not** help, because the cache ignores comments (measured). Each statement here
+# MAGIC carries a filter on a run-unique literal, `WHERE '<run id>' IS NOT NULL`. That is always true
+# MAGIC and folded away by the optimizer, but no earlier result can match it.
+# MAGIC
+# MAGIC The statement ids are recorded too. `system.query.history` holds the warehouse's full record
+# MAGIC of each one (duration, bytes read, cache use), usually a few minutes after it runs; see
+# MAGIC `docs/results.md` for the lookup query.
 # MAGIC
 # MAGIC **Which to put behind a 5-minute dashboard?** The one that reads least on every refresh: the
 # MAGIC materialized view, which pays its cost once per refresh (`mv_refresh_seconds`) instead of on
@@ -50,8 +56,11 @@ project, ev = bootstrap(spark, dbutils, step="serving")
 dbutils.widgets.text("warehouse_id", "")
 warehouse = Warehouse(dbutils.widgets.get("warehouse_id"))
 
-direct_sql = category_daily_sql(GOLD_CONVERSION_HOURLY.fqn(project))
-mv_sql = f"SELECT * FROM {mv_fqn(project)}"
+# A run-unique literal keeps the warehouse's result cache from answering instead
+# (the cache ignores comments, so a tag in a comment is not enough).
+nonce = f"'ecomm three_way run {ev.run_id}' IS NOT NULL"
+direct_sql = category_daily_sql(GOLD_CONVERSION_HOURLY.fqn(project), where=nonce)
+mv_sql = f"SELECT * FROM {mv_fqn(project)} WHERE {nonce}"
 
 # COMMAND ----------
 
@@ -73,8 +82,9 @@ ev.record("three_way.serverless_spark.rows", spark_rows.count())
 warehouse.run("SELECT 1")                                 # warm-up: the warehouse is running
 
 for path, statement in (("warehouse_direct", direct_sql), ("warehouse_mv", mv_sql)):
-    result = warehouse.run(statement)                     # first execution: no cached result
+    result = warehouse.run(statement)
     measured = warehouse.metrics(result.statement_id)
+    ev.record(f"three_way.{path}.statement_id", result.statement_id, "look up in system.query.history")
     ev.record(f"three_way.{path}.seconds", round(result.seconds, 2), "wall clock seen by the notebook")
     ev.record(f"three_way.{path}.duration_ms", measured["duration_ms"], "the warehouse's own record")
     ev.record(f"three_way.{path}.read_bytes", measured["read_bytes"])

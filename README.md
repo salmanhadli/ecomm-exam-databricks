@@ -16,6 +16,7 @@ The brief's three questions:
 **Start here:**
 - [docs/architecture.md](docs/architecture.md): data flow, jobs, Unity Catalog layout, code layout
 - [docs/decisions.md](docs/decisions.md): every design decision, with its context and cost
+- [docs/results.md](docs/results.md): what the first workspace run measured, the brief's evidence pack, the break log
 
 ## Project layout
 
@@ -30,7 +31,7 @@ The brief's three questions:
 ├── src/sql/reports/      Q1, Q2, Q3 queries for the SQL editor
 ├── tests/unit/           pytest on local Spark: every rule the brief asks you to defend
 ├── tests/parity/         harness → silver → gold on the full data, vs an earlier AWS run
-└── docs/                 architecture and the decision log (22 decisions)
+└── docs/                 architecture, decision log (23 decisions), measured results
 ```
 
 ## Workflow

@@ -15,8 +15,13 @@ from ecomm.project import Project
 MV_NAME = "mv_category_daily"
 
 
-def category_daily_sql(source: str) -> str:
-    """Conversion and revenue per category and day, computed from the hourly funnel table."""
+def category_daily_sql(source: str, where: str | None = None) -> str:
+    """Conversion and revenue per category and day, computed from the hourly funnel table.
+
+    `where` adds a filter; the serving benchmark passes a run-unique literal so the
+    warehouse's result cache cannot answer for it.
+    """
+    filter_clause = f"WHERE {where}" if where else ""
     return f"""
         SELECT category_id,
                date_trunc('DAY', event_hour)              AS business_date,
@@ -30,6 +35,7 @@ def category_daily_sql(source: str) -> str:
                try_divide(sum(purchases), sum(carts))     AS cart_to_purchase,
                try_divide(sum(revenue), sum(purchases))   AS revenue_per_purchase
         FROM {source}
+        {filter_clause}
         GROUP BY category_id, date_trunc('DAY', event_hour)"""
 
 
