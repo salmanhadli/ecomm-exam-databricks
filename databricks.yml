@@ -30,6 +30,12 @@ variables:
     description: SQL warehouse for the serving layer (materialized view, benchmark). Free Edition has one.
     lookup:
       warehouse: Serverless Starter Warehouse
+  trigger_principal:
+    description: >-
+      Service principal that starts the orchestrator from outside the workspace (the Workato
+      recipe). Looked up by display name, so its application ID never appears in the repository.
+    lookup:
+      service_principal: workato-trigger
 
 targets:
   dev:

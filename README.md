@@ -32,7 +32,7 @@ The brief's three questions:
 ├── src/sql/reports/      Q1, Q2, Q3 queries for the SQL editor
 ├── tests/unit/           pytest on local Spark: every rule the brief asks you to defend
 ├── tests/parity/         harness → silver → gold on the full data, vs an earlier AWS run
-└── docs/                 architecture, decision log (23 decisions), measured results
+└── docs/                 architecture, decision log (24 decisions), measured results
 ```
 
 ## Workflow
@@ -58,6 +58,11 @@ The brief's three questions:
    commands. A deploy started from a Databricks Git folder uses the workspace it runs in.
 
 2. For local development, install [uv](https://docs.astral.sh/uv/) and Java 17+ (for local Spark).
+
+3. Create a service principal named `workato-trigger` (**Settings → Identity and access →
+   Service principals**). External callers start the orchestrator as this identity (see
+   *Trigger from outside*). The bundle finds it by name, and `bundle validate` fails until it
+   exists.
 
 ## Develop (local)
 
@@ -165,6 +170,23 @@ databricks bundle run ecomm_99_orchestrator --params source_copy_from=/Volumes/<
 
 The harness is replayed only once: re-runs skip it when its output exists
 ([D-05](docs/decisions.md#d-05--keep-the-micro-batch-harness-and-make-re-runs-safe)).
+
+### Trigger from outside (Workato)
+
+A Workato recipe starts the orchestrator through the Jobs REST API, signed in as the
+`workato-trigger` service principal
+([D-24](docs/decisions.md#d-24--external-callers-start-the-orchestrator-as-a-service-principal)).
+The bundle grants that principal **Can Manage Run** on `ecomm_99_orchestrator`, so it can start
+and cancel runs and nothing else.
+
+| Setting | Value |
+|---|---|
+| Token URL | `https://<workspace>/oidc/v1/token` (OAuth client credentials, credentials in a Basic auth header) |
+| Scope | the scope the principal's OAuth secret was generated with, for example `jobs` |
+| Start a run | `POST https://<workspace>/api/2.2/jobs/run-now` with `{"job_id": <id>, "job_parameters": {"catalog": "exam_ecommerce"}, "idempotency_token": "<caller's request id>"}` |
+| Check a run | `GET https://<workspace>/api/2.2/jobs/runs/get?run_id=<run_id>` |
+
+The job id changes with each new deployment target. Look it up with `databricks bundle summary`.
 
 ## See the results
 

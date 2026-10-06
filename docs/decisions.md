@@ -29,6 +29,7 @@ costs. Numbers come from runs; where the AWS build measured something first, it 
 | D-21 | Serving SQL runs on the warehouse through the SDK; the MV refreshes per run | applied |
 | D-22 | Acceptance criteria are data, and the last task enforces them | applied |
 | D-23 | First deploy creates Unity Catalog objects before the pipeline | applied |
+| D-24 | External callers start the orchestrator as a service principal | applied |
 
 ---
 
@@ -321,3 +322,17 @@ catalog and schemas are created by the `setup` task at run time, not by the bund
 After that, every deploy is a single step.
 **Consequence.** No deployment command can ever drop the catalog. The cost is a two-pass first
 deploy, written down in the README.
+
+### D-24 · External callers start the orchestrator as a service principal
+
+**Context.** A Workato recipe starts the end-to-end run through the Jobs REST API. A caller
+outside the workspace can't use a person's browser login. A personal access token would act
+with all of that person's rights.
+**Decision.** The caller signs in as the `workato-trigger` service principal with an OAuth
+secret (client credentials). The bundle grants it `CAN_MANAGE_RUN` on `ecomm_99_orchestrator`
+only. The bundle finds the principal by display name (variable `trigger_principal`), so the
+public repository holds no application ID. The run itself executes as the job owner, so the
+principal needs no grant on the catalog or the warehouse.
+**Consequence.** A leaked secret can start or cancel this one job and do nothing else. The
+grant is code, so every deploy re-applies it. The cost is one manual step per workspace:
+create the service principal before the first deploy, or `bundle validate` fails.

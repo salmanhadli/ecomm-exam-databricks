@@ -18,6 +18,13 @@ resources:
         project: ecomm_exam
         layer: orchestrator
 
+      # External callers (the Workato recipe) start runs through the Jobs REST API as this
+      # service principal. CAN_MANAGE_RUN lets it start and cancel runs and nothing else. The
+      # run itself executes as the job owner, so the principal needs no data or warehouse access.
+      permissions:
+        - level: CAN_MANAGE_RUN
+          service_principal_name: ${var.trigger_principal}
+
       # Passed down to the layer jobs through each run_job_task's job_parameters.
       parameters:
         - name: catalog
